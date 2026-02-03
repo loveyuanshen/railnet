@@ -11,7 +11,7 @@ draft: false
 ---
 ```yaml
 ---
-title: 该内容已被加密
+title: railgun.de5.net
 published: 2025-02-02
 encrypted: true
 password: "railgun"
