@@ -1,0 +1,155 @@
+name: Sync Content Management Updates
+
+on:
+  workflow_dispatch:
+    inputs:
+      update_cms:
+        description: '更新CMS配置？'
+        required: true
+        default: 'true'
+        type: boolean
+      update_media:
+        description: '更新媒体目录结构？'
+        required: true
+        default: 'true'
+        type: boolean
+      update_components:
+        description: '更新图片组件？'
+        required: true
+        default: 'true'
+        type: boolean
+      confirm_sync:
+        description: '确认同步？输入 YES 继续'
+        required: true
+        default: 'NO'
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.confirm_sync == 'YES'
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Configure Git
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+      
+      - name: Add upstream
+        run: |
+          git remote add upstream https://github.com/Spr-Aachen/Twilight.git
+          git fetch upstream
+      
+      - name: Backup custom content
+        run: |
+          echo "🔒 备份自定义内容..."
+          mkdir -p .backup
+          
+          # 备份所有内容
+          if [ -d "src/content" ]; then
+            cp -r src/content .backup/
+            echo "✅ src/content 已备份"
+          fi
+          
+          # 备份配置
+          if [ -f "twilight.config.yaml" ]; then
+            cp twilight.config.yaml .backup/
+            echo "✅ twilight.config.yaml 已备份"
+          fi
+          
+          if [ -f ".env" ]; then
+            cp .env .backup/
+            echo "✅ .env 已备份"
+          fi
+          
+          if [ -d "public" ]; then
+            cp -r public .backup/
+            echo "✅ public 目录已备份"
+          fi
+      
+      - name: Update Decap CMS Configuration
+        if: github.event.inputs.update_cms == 'true'
+        run: |
+          echo "🔄 更新 Decap CMS 配置..."
+          
+          # 更新 astro.config.mjs 中的版本
+          if [ -f "astro.config.mjs" ]; then
+            sed -i 's/decapCMSVersion: "3.3.3"/decapCMSVersion: "3.9.0"/' astro.config.mjs
+            echo "✅ astro.config.mjs 已更新"
+          fi
+          
+          # 更新 .env 文件（移除旧的CMS配置）
+          if [ -f ".env" ]; then
+            # 移除旧的CMS配置行
+            sed -i '/# Decap CMS/,/PUBLIC_DECAP_CMS_VERSION=3.3.3/d' .env
+            echo "✅ .env 已清理"
+          fi
+          
+          # 更新 CMS 配置文件
+          if [ -f "public/admin/config.yml" ]; then
+            # 添加语言设置
+            if ! grep -q "locale:" public/admin/config.yml; then
+              sed -i '/auth_endpoint: oauth/a\\n\\n# 设置后台系统语言 (zh_Hans 简体中文 | en 英文 | ...)\\nlocale: en' public/admin/config.yml
+            fi
+            
+            # 更新媒体目录配置
+            sed -i 's|media_folder: "public/images"|media_folder: "public/assets/images"|' public/admin/config.yml
+            sed -i 's|public_folder: "/images"|public_folder: "/assets/images"|' public/admin/config.yml
+            
+            echo "✅ public/admin/config.yml 已更新"
+          fi
+      
+      - name: Update Media Directory Structure
+        if: github.event.inputs.update_media == 'true'
+        run: |
+          echo "🔄 更新媒体目录结构..."
+          
+          # 创建新的媒体目录
+          mkdir -p public/assets/images
+          
+          # 移动现有图片到新目录
+          if [ -d "public/images" ] && [ "$(ls -A public/images)" ]; then
+            echo "移动现有图片到新目录..."
+            cp -r public/images/* public/assets/images/ 2>/dev/null || true
+            echo "✅ 图片已移动到新目录"
+          fi
+          
+          # 更新内容中的图片路径
+          find src/content -name "*.md" -o -name "*.json" | while read file; do
+            sed -i 's|/images/|/assets/images/|g' "$file"
+          done
+          echo "✅ 内容中的图片路径已更新"
+      
+      - name: Update Image Components
+        if: github.event.inputs.update_components == 'true'
+        run: |
+          echo "🔄 更新图片组件..."
+          
+          # 获取上游的 ImageWrapper 组件
+          if [ -f "upstream/main/src/components/common/imageWrapper.astro" ]; then
+            mkdir -p src/components/common
+            cp upstream/main/src/components/common/imageWrapper.astro src/components/common/
+            echo "✅ ImageWrapper 组件已添加"
+          fi
+          
+          # 更新 projectCard.astro
+          if [ -f "src/components/data/projectCard.astro" ]; then
+            # 添加 ImageWrapper 导入
+            if ! grep -q "ImageWrapper" src/components/data/projectCard.astro; then
+              sed -i '/import I18nKey from "@i18n\/i18nKey";/a import ImageWrapper from "@components/common/imageWrapper.astro";' src/components/data/projectCard.astro
+            fi
+            
+            # 添加 basePath 属性
+            if ! grep -q "basePath?:" src/components/data/projectCard.astro; then
+              sed -i '/tags?: string\[\];/a \  basePath?: string;' src/components/data/projectCard.astro
+            fi
+            
+            # 替换 img 标签为 ImageWrapper
+            sed -i 's|<img|<ImageWrapp
