@@ -152,4 +152,111 @@ jobs:
             fi
             
             # 替换 img 标签为 ImageWrapper
-            sed -i 's|<img|<ImageWrapp
+            sed -i 's|<img|<ImageWrapper|g' src/components/data/projectCard.astro
+            sed -i 's|/>|/>|g' src/components/data/projectCard.astro
+            sed -i 's|loading="lazy"|basePath={project.basePath}|g' src/components/data/projectCard.astro
+            
+            echo "✅ projectCard.astro 已更新"
+          fi
+          
+          # 更新相册页面组件
+          for page in src/pages/albums.astro src/pages/albums/\[id\]/index.astro; do
+            if [ -f "$page" ]; then
+              # 添加 ImageWrapper 导入
+              if ! grep -q "ImageWrapper" "$page"; then
+                sed -i '/import BackwardButton/a import ImageWrapper from "@components/common/imageWrapper.astro";' "$page"
+              fi
+              
+              # 替换 img 标签
+              sed -i 's|<img|<ImageWrapper|g' "$page"
+              sed -i 's|loading="lazy"|basePath={album.basePath}|g' "$page"
+              
+              echo "✅ $page 已更新"
+            fi
+          done
+      
+      - name: Restore Custom Content
+        run: |
+          echo "🔒 恢复自定义内容..."
+          
+          # 恢复内容目录（保留结构更新）
+          if [ -d ".backup/content" ]; then
+            # 先恢复，然后应用新的结构
+            cp -r .backup/content/* src/content/ 2>/dev/null || true
+            
+            # 确保新的示例文件存在（如果上游有）
+            if [ -f "upstream/main/src/content/diary/example.json" ] && [ ! -f "src/content/diary/example.json" ]; then
+              cp upstream/main/src/content/diary/example.json src/content/diary/
+            fi
+            
+            echo "✅ 内容已恢复并更新"
+          fi
+          
+          # 恢复配置文件
+          if [ -f ".backup/twilight.config.yaml" ]; then
+            cp .backup/twilight.config.yaml twilight.config.yaml
+            echo "✅ twilight.config.yaml 已恢复"
+          fi
+      
+      - name: Update Dependencies
+        run: |
+          echo "🔄 更新依赖..."
+          
+          # 更新 package.json 中的依赖版本
+          if [ -f "upstream/main/package.json" ]; then
+            # 使用更简单的方法更新关键依赖
+            node -e "
+              const fs = require('fs');
+              const local = JSON.parse(fs.readFileSync('./package.json', 'utf8'));
+              const upstream = JSON.parse(fs.readFileSync('./upstream/main/package.json', 'utf8'));
+              
+              ['dependencies', 'devDependencies'].forEach(type => {
+                if (upstream[type]) {
+                  Object.keys(upstream[type]).forEach(pkg => {
+                    if (local[type] && local[type][pkg] && local[type][pkg] !== upstream[type][pkg]) {
+                      console.log('更新', pkg, '从', local[type][pkg], '到', upstream[type][pkg]);
+                      local[type][pkg] = upstream[type][pkg];
+                    }
+                  });
+                }
+              });
+              
+              fs.writeFileSync('./package.json', JSON.stringify(local, null, 2));
+            " || echo "依赖更新跳过"
+            echo "✅ package.json 已检查"
+          fi
+      
+      - name: Commit and Push
+        run: |
+          git add .
+          git commit -m "更新内容管理系统 (PR #73)
+
+- 升级 Decap CMS 到 3.9.0
+- 重构媒体目录结构 (/images → /assets/images)
+- 新增 ImageWrapper 组件
+- 优化图片处理
+- 更新 CMS 配置支持嵌套目录" || {
+            echo "没有需要提交的更改"
+          }
+          git push origin main
+      
+      - name: Summary
+        run: |
+          echo "## 📊 内容管理更新完成" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ✅ 已完成的更新" >> $GITHUB_STEP_SUMMARY
+          echo "- Decap CMS 版本升级 (3.3.3 → 3.9.0)" >> $GITHUB_STEP_SUMMARY
+          echo "- 媒体目录重构 (/images → /assets/images)" >> $GITHUB_STEP_SUMMARY
+          echo "- 新增 ImageWrapper 图片组件" >> $GITHUB_STEP_SUMMARY
+          echo "- CMS 配置增强" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔒 保护的内容" >> $GITHUB_STEP_SUMMARY
+          echo "- 所有自定义文章和页面" >> $GITHUB_STEP_SUMMARY
+          echo "- 个人配置文件" >> $GITHUB_STEP_SUMMARY
+          echo "- 自定义媒体文件" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📝 后续步骤" >> $GITHUB_STEP_SUMMARY
+          echo "1. 本地运行 \`pnpm install\` 更新依赖" >> $GITHUB_STEP_SUMMARY
+          echo "2. 检查 CMS 后台功能" >> $GITHUB_STEP_SUMMARY
+          echo "3. 验证图片显示正常" >> $GITHUB_STEP_SUMMARY
+          echo "4. 测试新的媒体目录结构" >> $GITHUB_STEP_SUMMARY
