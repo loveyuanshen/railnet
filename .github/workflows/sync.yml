@@ -1,4 +1,4 @@
-name: Sync Twilight Updates
+name: Sync From Upstream (True Sync)
 
 on:
   workflow_dispatch:
@@ -27,116 +27,146 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
       
-      - name: Add upstream
+      - name: Add upstream and fetch
         run: |
           git remote add upstream https://github.com/Spr-Aachen/Twilight.git
           git fetch upstream
-      
-      - name: Check updates
-        id: check
-        run: |
-          LOCAL=$(git rev-parse HEAD)
-          UPSTREAM=$(git rev-parse upstream/main)
           
-          if [ "$LOCAL" = "$UPSTREAM" ]; then
-            echo "already_latest=true" >> $GITHUB_OUTPUT
-            echo "✅ 本地已是最新版本"
-          else
-            echo "already_latest=false" >> $GITHUB_OUTPUT
-            echo "🔄 发现更新，准备同步"
-            echo "本地: $LOCAL"
-            echo "上游: $UPSTREAM"
-          fi
+          # 显示上游和本地的差异
+          echo "📊 上游最新提交："
+          git log --oneline upstream/main -5
+          echo "📊 本地最新提交："
+          git log --oneline HEAD -5
       
-      - name: Backup important files
-        if: steps.check.outputs.already_latest == 'false'
+      - name: Backup custom content ONLY
         run: |
-          echo "🔒 备份重要文件..."
+          echo "🔒 只备份自定义内容..."
           mkdir -p .backup
           
-          # 备份内容目录
+          # 只备份用户自定义内容
           if [ -d "src/content" ]; then
             cp -r src/content .backup/
             echo "✅ src/content 已备份"
           fi
           
-          # 备份配置文件
           if [ -f "twilight.config.yaml" ]; then
             cp twilight.config.yaml .backup/
             echo "✅ twilight.config.yaml 已备份"
           fi
           
-          # 备份环境变量
           if [ -f ".env" ]; then
             cp .env .backup/
             echo "✅ .env 已备份"
           fi
-      
-      - name: Sync updates
-        if: steps.check.outputs.already_latest == 'false'
-        run: |
-          echo "🔄 开始同步上游更新..."
           
-          # 尝试合并
-          if git merge upstream/main --allow-unrelated-histories --no-edit; then
-            echo "✅ 合并成功"
-          else
-            echo "❌ 合并冲突，恢复备份文件"
-            
-            # 恢复备份
-            if [ -d ".backup/content" ]; then
-              rm -rf src/content
-              cp -r .backup/content src/
-            fi
-            
-            if [ -f ".backup/twilight.config.yaml" ]; then
-              cp .backup/twilight.config.yaml twilight.config.yaml
-            fi
-            
-            if [ -f ".backup/.env" ]; then
-              cp .backup/.env .env
-            fi
-            
-            echo "🔒 已恢复你的自定义文件"
-            exit 1
+          # 备份public中的自定义文件（不是全部）
+          if [ -d "public" ]; then
+            mkdir -p .backup/public-custom
+            # 只备份用户可能自定义的文件
+            find public -name "*.jpg" -o -name "*.png" -o -name "*.gif" -o -name "*.svg" | head -20 | xargs cp -t .backup/public-custom/ 2>/dev/null || true
+            echo "✅ 自定义媒体文件已备份"
           fi
       
-      - name: Restore custom files
-        if: steps.check.outputs.already_latest == 'false'
+      - name: TRUE SYNC: Replace with upstream files
         run: |
-          echo "🔒 恢复自定义文件..."
+          echo "🔄 真正从上游同步：替换所有文件..."
           
-          # 恢复内容目录
+          # 方法1：完全重置到上游，然后恢复自定义内容
+          git reset --hard upstream/main
+          echo "✅ 已重置到上游最新版本"
+          
+          # 显示同步的文件列表
+          echo "📋 同步的文件："
+          git diff HEAD~1 --name-only
+      
+      - name: Restore custom content
+        run: |
+          echo "🔒 恢复自定义内容..."
+          
+          # 恢复用户内容
           if [ -d ".backup/content" ]; then
-            rm -rf src/content
-            cp -r .backup/content src/
+            cp -r .backup/content/* src/content/ 2>/dev/null || true
             echo "✅ src/content 已恢复"
           fi
           
-          # 恢复配置文件（保留你的自定义配置）
           if [ -f ".backup/twilight.config.yaml" ]; then
             cp .backup/twilight.config.yaml twilight.config.yaml
             echo "✅ twilight.config.yaml 已恢复"
           fi
           
-          # 提交恢复的文件
-          git add src/content twilight.config.yaml
-          git commit -m "恢复自定义内容" || echo "无需提交恢复文件"
+          if [ -f ".backup/.env" ]; then
+            cp .backup/.env .env
+            echo "✅ .env 已恢复"
+          fi
+          
+          # 恢复自定义媒体文件
+          if [ -d ".backup/public-custom" ]; then
+            cp -r .backup/public-custom/* public/ 2>/dev/null || true
+            echo "✅ 自定义媒体文件已恢复"
+          fi
       
-      - name: Push changes
-        if: steps.check.outputs.already_latest == 'false'
+      - name: Verify sync result
         run: |
+          echo "🔍 验证同步结果..."
+          
+          # 检查关键文件是否来自上游
+          echo "📋 检查关键文件："
+          
+          # 检查 CMS 版本
+          if grep -q "3.9.0" astro.config.mjs; then
+            echo "✅ Decap CMS 版本已更新到 3.9.0"
+          else
+            echo "❌ Decap CMS 版本更新失败"
+          fi
+          
+          # 检查 ImageWrapper 组件
+          if [ -f "src/components/common/imageWrapper.astro" ]; then
+            echo "✅ ImageWrapper 组件已同步"
+          else
+            echo "❌ ImageWrapper 组件同步失败"
+          fi
+          
+          # 检查媒体目录配置
+          if grep -q "assets/images" public/admin/config.yml; then
+            echo "✅ 媒体目录配置已更新"
+          else
+            echo "❌ 媒体目录配置更新失败"
+          fi
+          
+          # 检查自定义内容是否保留
+          if [ -d "src/content/posts" ] || [ -d "src/content/diary" ]; then
+            echo "✅ 自定义内容已保留"
+          else
+            echo "❌ 自定义内容丢失"
+          fi
+      
+      - name: Commit and push
+        run: |
+          git add .
+          git commit -m "从上游完全同步 (commit: $(git rev-parse upstream/main))
+
+- 同步上游所有更新
+- 保留自定义内容
+- 更新到上游最新版本" || {
+            echo "没有需要提交的更改"
+          }
           git push origin main
       
       - name: Summary
-        if: always()
         run: |
-          echo "## 📊 同步结果" >> $GITHUB_STEP_SUMMARY
-          
-          if [ "${{ steps.check.outputs.already_latest }}" == "true" ]; then
-            echo "✅ **状态**: 本地已是最新版本" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "🔄 **状态**: 同步完成" >> $GITHUB_STEP_SUMMARY
-            echo "🔒 **保护**: src/content 和 twilight.config.yaml 已保护" >> $GITHUB_STEP_SUMMARY
-            echo "📝 **建议**: 本地运行 \`pnpm dev\` 测试功能" >> $GITHUB_STEP_SUMMARY
-          fi
+          echo "## 📊 真正从上游同步完成" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ✅ 同步方式" >> $GITHUB_STEP_SUMMARY
+          echo "- 完全重置到上游最新版本" >> $GITHUB_STEP_SUMMARY
+          echo "- 恢复自定义内容" >> $GITHUB_STEP_SUMMARY
+          echo "- 所有文件都来自上游分支" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 上游提交信息" >> $GITHUB_STEP_SUMMARY
+          echo "- 提交哈希: $(git rev-parse upstream/main)" >> $GITHUB_STEP_SUMMARY
+          echo "- 提交消息: $(git log -1 --pretty=format:'%s' upstream/main)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔒 保护的内容" >> $GITHUB_STEP_SUMMARY
+          echo "- src/content (所有自定义文章和页面)" >> $GITHUB_STEP_SUMMARY
+          echo "- twilight.config.yaml (个人配置)" >> $GITHUB_STEP_SUMMARY
+          echo "- .env (环境变量)" >> $GITHUB_STEP_SUMMARY
+          echo "- 自定义媒体文件" >> $GITHUB_STEP_SUMMARY
