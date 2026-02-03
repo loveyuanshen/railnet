@@ -6,7 +6,7 @@ description: |-
 
   > 真的会有人这么做吗？
 tags:
-  - LobeChat
+  - Encryption
 category: Encryption
 draft: false
 ---
