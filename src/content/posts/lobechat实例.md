@@ -7,6 +7,7 @@ description: |-
   > 真的会有人这么做吗？
 tags:
   - LobeChat
+category: Encryption
 draft: false
 ---
 ## Frontmatter Example
