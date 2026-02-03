@@ -1,9 +1,10 @@
 ---
 title: Draft Example
 published: 2021-12-02
-tags: [Markdown]
+tags:
+  - Markdown
 category: Examples
-draft: true
+draft: false
 ---
 
 
