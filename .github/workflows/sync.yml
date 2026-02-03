@@ -1,0 +1,142 @@
+name: Sync Twilight Updates
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_sync:
+        description: '确认同步？输入 YES 继续'
+        required: true
+        default: 'NO'
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.confirm_sync == 'YES'
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Configure Git
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+      
+      - name: Add upstream
+        run: |
+          git remote add upstream https://github.com/Spr-Aachen/Twilight.git
+          git fetch upstream
+      
+      - name: Check updates
+        id: check
+        run: |
+          LOCAL=$(git rev-parse HEAD)
+          UPSTREAM=$(git rev-parse upstream/main)
+          
+          if [ "$LOCAL" = "$UPSTREAM" ]; then
+            echo "already_latest=true" >> $GITHUB_OUTPUT
+            echo "✅ 本地已是最新版本"
+          else
+            echo "already_latest=false" >> $GITHUB_OUTPUT
+            echo "🔄 发现更新，准备同步"
+            echo "本地: $LOCAL"
+            echo "上游: $UPSTREAM"
+          fi
+      
+      - name: Backup important files
+        if: steps.check.outputs.already_latest == 'false'
+        run: |
+          echo "🔒 备份重要文件..."
+          mkdir -p .backup
+          
+          # 备份内容目录
+          if [ -d "src/content" ]; then
+            cp -r src/content .backup/
+            echo "✅ src/content 已备份"
+          fi
+          
+          # 备份配置文件
+          if [ -f "twilight.config.yaml" ]; then
+            cp twilight.config.yaml .backup/
+            echo "✅ twilight.config.yaml 已备份"
+          fi
+          
+          # 备份环境变量
+          if [ -f ".env" ]; then
+            cp .env .backup/
+            echo "✅ .env 已备份"
+          fi
+      
+      - name: Sync updates
+        if: steps.check.outputs.already_latest == 'false'
+        run: |
+          echo "🔄 开始同步上游更新..."
+          
+          # 尝试合并
+          if git merge upstream/main --allow-unrelated-histories --no-edit; then
+            echo "✅ 合并成功"
+          else
+            echo "❌ 合并冲突，恢复备份文件"
+            
+            # 恢复备份
+            if [ -d ".backup/content" ]; then
+              rm -rf src/content
+              cp -r .backup/content src/
+            fi
+            
+            if [ -f ".backup/twilight.config.yaml" ]; then
+              cp .backup/twilight.config.yaml twilight.config.yaml
+            fi
+            
+            if [ -f ".backup/.env" ]; then
+              cp .backup/.env .env
+            fi
+            
+            echo "🔒 已恢复你的自定义文件"
+            exit 1
+          fi
+      
+      - name: Restore custom files
+        if: steps.check.outputs.already_latest == 'false'
+        run: |
+          echo "🔒 恢复自定义文件..."
+          
+          # 恢复内容目录
+          if [ -d ".backup/content" ]; then
+            rm -rf src/content
+            cp -r .backup/content src/
+            echo "✅ src/content 已恢复"
+          fi
+          
+          # 恢复配置文件（保留你的自定义配置）
+          if [ -f ".backup/twilight.config.yaml" ]; then
+            cp .backup/twilight.config.yaml twilight.config.yaml
+            echo "✅ twilight.config.yaml 已恢复"
+          fi
+          
+          # 提交恢复的文件
+          git add src/content twilight.config.yaml
+          git commit -m "恢复自定义内容" || echo "无需提交恢复文件"
+      
+      - name: Push changes
+        if: steps.check.outputs.already_latest == 'false'
+        run: |
+          git push origin main
+      
+      - name: Summary
+        if: always()
+        run: |
+          echo "## 📊 同步结果" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.check.outputs.already_latest }}" == "true" ]; then
+            echo "✅ **状态**: 本地已是最新版本" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "🔄 **状态**: 同步完成" >> $GITHUB_STEP_SUMMARY
+            echo "🔒 **保护**: src/content 和 twilight.config.yaml 已保护" >> $GITHUB_STEP_SUMMARY
+            echo "📝 **建议**: 本地运行 \`pnpm dev\` 测试功能" >> $GITHUB_STEP_SUMMARY
+          fi
