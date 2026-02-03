@@ -9,6 +9,8 @@ tags:
   - LobeChat
 draft: false
 ---
+## Frontmatter Example
+
 ```yaml
 ---
 title: railgun.de5.net
@@ -18,3 +20,6 @@ password: "railgun"
 ...
 ---
 ```
+
+- `encrypted` - Whether encryption is enabled for the post.
+- `password` - The password required to unlock the content.
