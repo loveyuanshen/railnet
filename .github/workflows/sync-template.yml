@@ -1,0 +1,111 @@
+name: 🔁 Sync with Template Repository
+
+on:
+  # 定时触发：每天 UTC 时间 4:00 执行（北京时间 12:00）
+  schedule:
+    - cron: "0 4 * * *"
+  
+  # 手动触发：可以在 GitHub Actions 界面手动运行
+  workflow_dispatch:
+    inputs:
+      template_branch:
+        description: 'Template branch to sync from'
+        required: false
+        default: 'main'
+
+# 只有在默认分支上运行定时任务
+jobs:
+  sync-template:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: 🛎️ Checkout current repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0  # 获取完整历史
+
+      - name: 📥 Set up Git user
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: 🎯 Get template repository info
+        id: template_info
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "TEMPLATE_REPO=Spr-Aachen/Twilight" >> $GITHUB_ENV
+            echo "TEMPLATE_BRANCH=${{ github.event.inputs.template_branch }}" >> $GITHUB_ENV
+          else
+            echo "TEMPLATE_REPO=Spr-Aachen/Twilight" >> $GITHUB_ENV
+            echo "TEMPLATE_BRANCH=main" >> $GITHUB_ENV
+          fi
+
+      - name: 🔗 Add template repository as remote
+        run: |
+          git remote add template https://github.com/${{ env.TEMPLATE_REPO }}.git
+
+      - name: 📥 Fetch template repository
+        run: |
+          git fetch template ${{ env.TEMPLATE_BRANCH }}
+
+      - name: 🔄 Check if there are new commits
+        id: check_commits
+        run: |
+          # 比较当前分支和模板分支的最新提交
+          LOCAL_COMMIT=$(git rev-parse HEAD)
+          TEMPLATE_COMMIT=$(git rev-parse template/${{ env.TEMPLATE_BRANCH }})
+          
+          if [ "$LOCAL_COMMIT" = "$TEMPLATE_COMMIT" ]; then
+            echo "No new commits in template repository"
+            echo "HAS_NEW_COMMITS=false" >> $GITHUB_ENV
+          else
+            echo "New commits found in template repository"
+            echo "HAS_NEW_COMMITS=true" >> $GITHUB_ENV
+            echo "TEMPLATE_COMMIT=$TEMPLATE_COMMIT" >> $GITHUB_ENV
+            # 创建短版本的 commit hash
+            echo "TEMPLATE_COMMIT_SHORT=$(echo $TEMPLATE_COMMIT | cut -c1-8)" >> $GITHUB_ENV
+          fi
+
+      - name: 🚫 Skip if no new commits
+        if: env.HAS_NEW_COMMITS == 'false'
+        run: |
+          echo "✅ Template is already up to date"
+          exit 0
+
+      - name: 🌿 Create sync branch
+        run: |
+          git checkout -b template-sync-${{ env.TEMPLATE_COMMIT_SHORT }}
+
+      - name: 🤝 Merge template changes
+        run: |
+          # 使用 --allow-unrelated-histories 因为这是模板仓库
+          git merge template/${{ env.TEMPLATE_BRANCH }} --allow-unrelated-histories -m "chore: sync with template ${{ env.TEMPLATE_COMMIT_SHORT }}"
+
+      - name: 📤 Push sync branch
+        run: |
+          git push origin template-sync-${{ env.TEMPLATE_COMMIT_SHORT }}
+
+      - name: 📝 Create Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: template-sync-${{ env.TEMPLATE_COMMIT_SHORT }}
+          base: ${{ github.ref_name }}
+          title: '🔄 Sync with Twilight template repository'
+          body: |
+            This PR syncs changes from the Twilight template repository [Spr-Aachen/Twilight](https://github.com/Spr-Aachen/Twilight).
+            
+            **Template commit:** `${{ env.TEMPLATE_COMMIT }}`
+            
+            Please review the changes before merging.
+            
+            ---
+            
+            *This PR was automatically created by the sync workflow.*
+          labels: |
+            sync
+            template
+          reviewers: ''
+          assignees: ''
