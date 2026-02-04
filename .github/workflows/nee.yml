@@ -1,27 +1,7 @@
-name: Sync Content Management Updates
+name: Simple Sync From Upstream
 
 on:
   workflow_dispatch:
-    inputs:
-      update_cms:
-        description: '更新CMS配置？'
-        required: true
-        default: 'true'
-        type: boolean
-      update_media:
-        description: '更新媒体目录结构？'
-        required: true
-        default: 'true'
-        type: boolean
-      update_components:
-        description: '更新图片组件？'
-        required: true
-        default: 'true'
-        type: boolean
-      confirm_sync:
-        description: '确认同步？输入 YES 继续'
-        required: true
-        default: 'NO'
 
 permissions:
   contents: write
@@ -29,7 +9,6 @@ permissions:
 jobs:
   sync:
     runs-on: ubuntu-latest
-    if: github.event.inputs.confirm_sync == 'YES'
     
     steps:
       - name: Checkout
@@ -42,221 +21,77 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
       
-      - name: Add upstream
+      - name: Add upstream and sync
         run: |
+          echo "🚀 开始从上游同步..."
+          
+          # 添加上游仓库
           git remote add upstream https://github.com/Spr-Aachen/Twilight.git
+          
+          # 获取上游代码
           git fetch upstream
-      
-      - name: Backup custom content
-        run: |
-          echo "🔒 备份自定义内容..."
+          
+          # 备份自定义内容
+          echo "📦 备份自定义内容..."
           mkdir -p .backup
           
-          # 备份所有内容
           if [ -d "src/content" ]; then
             cp -r src/content .backup/
-            echo "✅ src/content 已备份"
+            echo "✅ 备份 src/content"
           fi
           
-          # 备份配置
           if [ -f "twilight.config.yaml" ]; then
             cp twilight.config.yaml .backup/
-            echo "✅ twilight.config.yaml 已备份"
+            echo "✅ 备份 twilight.config.yaml"
           fi
           
           if [ -f ".env" ]; then
             cp .env .backup/
-            echo "✅ .env 已备份"
+            echo "✅ 备份 .env"
           fi
           
-          if [ -d "public" ]; then
-            cp -r public .backup/
-            echo "✅ public 目录已备份"
-          fi
-      
-      - name: Update Decap CMS Configuration
-        if: github.event.inputs.update_cms == 'true'
-        run: |
-          echo "🔄 更新 Decap CMS 配置..."
+          # 完全重置到上游
+          echo "🔄 重置到上游最新版本..."
+          git reset --hard upstream/main
           
-          # 更新 astro.config.mjs 中的版本
-          if [ -f "astro.config.mjs" ]; then
-            sed -i 's/decapCMSVersion: "3.3.3"/decapCMSVersion: "3.9.0"/' astro.config.mjs
-            echo "✅ astro.config.mjs 已更新"
-          fi
-          
-          # 更新 .env 文件（移除旧的CMS配置）
-          if [ -f ".env" ]; then
-            # 移除旧的CMS配置行
-            sed -i '/# Decap CMS/,/PUBLIC_DECAP_CMS_VERSION=3.3.3/d' .env
-            echo "✅ .env 已清理"
-          fi
-          
-          # 更新 CMS 配置文件
-          if [ -f "public/admin/config.yml" ]; then
-            # 添加语言设置
-            if ! grep -q "locale:" public/admin/config.yml; then
-              sed -i '/auth_endpoint: oauth/a\\n\\n# 设置后台系统语言 (zh_Hans 简体中文 | en 英文 | ...)\\nlocale: en' public/admin/config.yml
-            fi
-            
-            # 更新媒体目录配置
-            sed -i 's|media_folder: "public/images"|media_folder: "public/assets/images"|' public/admin/config.yml
-            sed -i 's|public_folder: "/images"|public_folder: "/assets/images"|' public/admin/config.yml
-            
-            echo "✅ public/admin/config.yml 已更新"
-          fi
-      
-      - name: Update Media Directory Structure
-        if: github.event.inputs.update_media == 'true'
-        run: |
-          echo "🔄 更新媒体目录结构..."
-          
-          # 创建新的媒体目录
-          mkdir -p public/assets/images
-          
-          # 移动现有图片到新目录
-          if [ -d "public/images" ] && [ "$(ls -A public/images)" ]; then
-            echo "移动现有图片到新目录..."
-            cp -r public/images/* public/assets/images/ 2>/dev/null || true
-            echo "✅ 图片已移动到新目录"
-          fi
-          
-          # 更新内容中的图片路径
-          find src/content -name "*.md" -o -name "*.json" | while read file; do
-            sed -i 's|/images/|/assets/images/|g' "$file"
-          done
-          echo "✅ 内容中的图片路径已更新"
-      
-      - name: Update Image Components
-        if: github.event.inputs.update_components == 'true'
-        run: |
-          echo "🔄 更新图片组件..."
-          
-          # 获取上游的 ImageWrapper 组件
-          if [ -f "upstream/main/src/components/common/imageWrapper.astro" ]; then
-            mkdir -p src/components/common
-            cp upstream/main/src/components/common/imageWrapper.astro src/components/common/
-            echo "✅ ImageWrapper 组件已添加"
-          fi
-          
-          # 更新 projectCard.astro
-          if [ -f "src/components/data/projectCard.astro" ]; then
-            # 添加 ImageWrapper 导入
-            if ! grep -q "ImageWrapper" src/components/data/projectCard.astro; then
-              sed -i '/import I18nKey from "@i18n\/i18nKey";/a import ImageWrapper from "@components/common/imageWrapper.astro";' src/components/data/projectCard.astro
-            fi
-            
-            # 添加 basePath 属性
-            if ! grep -q "basePath?:" src/components/data/projectCard.astro; then
-              sed -i '/tags?: string\[\];/a \  basePath?: string;' src/components/data/projectCard.astro
-            fi
-            
-            # 替换 img 标签为 ImageWrapper
-            sed -i 's|<img|<ImageWrapper|g' src/components/data/projectCard.astro
-            sed -i 's|/>|/>|g' src/components/data/projectCard.astro
-            sed -i 's|loading="lazy"|basePath={project.basePath}|g' src/components/data/projectCard.astro
-            
-            echo "✅ projectCard.astro 已更新"
-          fi
-          
-          # 更新相册页面组件
-          for page in src/pages/albums.astro src/pages/albums/\[id\]/index.astro; do
-            if [ -f "$page" ]; then
-              # 添加 ImageWrapper 导入
-              if ! grep -q "ImageWrapper" "$page"; then
-                sed -i '/import BackwardButton/a import ImageWrapper from "@components/common/imageWrapper.astro";' "$page"
-              fi
-              
-              # 替换 img 标签
-              sed -i 's|<img|<ImageWrapper|g' "$page"
-              sed -i 's|loading="lazy"|basePath={album.basePath}|g' "$page"
-              
-              echo "✅ $page 已更新"
-            fi
-          done
-      
-      - name: Restore Custom Content
-        run: |
+          # 恢复自定义内容
           echo "🔒 恢复自定义内容..."
           
-          # 恢复内容目录（保留结构更新）
           if [ -d ".backup/content" ]; then
-            # 先恢复，然后应用新的结构
             cp -r .backup/content/* src/content/ 2>/dev/null || true
-            
-            # 确保新的示例文件存在（如果上游有）
-            if [ -f "upstream/main/src/content/diary/example.json" ] && [ ! -f "src/content/diary/example.json" ]; then
-              cp upstream/main/src/content/diary/example.json src/content/diary/
-            fi
-            
-            echo "✅ 内容已恢复并更新"
+            echo "✅ 恢复 src/content"
           fi
           
-          # 恢复配置文件
           if [ -f ".backup/twilight.config.yaml" ]; then
             cp .backup/twilight.config.yaml twilight.config.yaml
-            echo "✅ twilight.config.yaml 已恢复"
+            echo "✅ 恢复 twilight.config.yaml"
           fi
-      
-      - name: Update Dependencies
-        run: |
-          echo "🔄 更新依赖..."
           
-          # 更新 package.json 中的依赖版本
-          if [ -f "upstream/main/package.json" ]; then
-            # 使用更简单的方法更新关键依赖
-            node -e "
-              const fs = require('fs');
-              const local = JSON.parse(fs.readFileSync('./package.json', 'utf8'));
-              const upstream = JSON.parse(fs.readFileSync('./upstream/main/package.json', 'utf8'));
-              
-              ['dependencies', 'devDependencies'].forEach(type => {
-                if (upstream[type]) {
-                  Object.keys(upstream[type]).forEach(pkg => {
-                    if (local[type] && local[type][pkg] && local[type][pkg] !== upstream[type][pkg]) {
-                      console.log('更新', pkg, '从', local[type][pkg], '到', upstream[type][pkg]);
-                      local[type][pkg] = upstream[type][pkg];
-                    }
-                  });
-                }
-              });
-              
-              fs.writeFileSync('./package.json', JSON.stringify(local, null, 2));
-            " || echo "依赖更新跳过"
-            echo "✅ package.json 已检查"
+          if [ -f ".backup/.env" ]; then
+            cp .backup/.env .env
+            echo "✅ 恢复 .env"
           fi
-      
-      - name: Commit and Push
-        run: |
+          
+          # 提交更改
+          echo "📝 提交同步..."
           git add .
-          git commit -m "更新内容管理系统 (PR #73)
+          git commit -m "从上游同步
 
-- 升级 Decap CMS 到 3.9.0
-- 重构媒体目录结构 (/images → /assets/images)
-- 新增 ImageWrapper 组件
-- 优化图片处理
-- 更新 CMS 配置支持嵌套目录" || {
-            echo "没有需要提交的更改"
-          }
+上游提交: $(git rev-parse upstream/main)
+同步时间: $(date)
+
+- 完全从上游同步
+- 保留自定义内容" || echo "没有更改需要提交"
+          
+          # 推送到远程
           git push origin main
+          
+          echo "✅ 同步完成！"
       
-      - name: Summary
+      - name: Show result
         run: |
-          echo "## 📊 内容管理更新完成" >> $GITHUB_STEP_SUMMARY
+          echo "## 📊 同步结果" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### ✅ 已完成的更新" >> $GITHUB_STEP_SUMMARY
-          echo "- Decap CMS 版本升级 (3.3.3 → 3.9.0)" >> $GITHUB_STEP_SUMMARY
-          echo "- 媒体目录重构 (/images → /assets/images)" >> $GITHUB_STEP_SUMMARY
-          echo "- 新增 ImageWrapper 图片组件" >> $GITHUB_STEP_SUMMARY
-          echo "- CMS 配置增强" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🔒 保护的内容" >> $GITHUB_STEP_SUMMARY
-          echo "- 所有自定义文章和页面" >> $GITHUB_STEP_SUMMARY
-          echo "- 个人配置文件" >> $GITHUB_STEP_SUMMARY
-          echo "- 自定义媒体文件" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📝 后续步骤" >> $GITHUB_STEP_SUMMARY
-          echo "1. 本地运行 \`pnpm install\` 更新依赖" >> $GITHUB_STEP_SUMMARY
-          echo "2. 检查 CMS 后台功能" >> $GITHUB_STEP_SUMMARY
-          echo "3. 验证图片显示正常" >> $GITHUB_STEP_SUMMARY
-          echo "4. 测试新的媒体目录结构" >> $GITHUB_STEP_SUMMARY
+          echo "✅ 已从上游完全同步" >> $GITHUB_STEP_SUMMARY
+          echo "🔒 自定义内容已保护" >> $GITHUB_STEP_SUMMARY
+          echo "📝 所有更改已提交" >> $GITHUB_STEP_SUMMARY
